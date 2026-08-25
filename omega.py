@@ -3,7 +3,10 @@ import sys
 import click
 import plistlib
 import asyncio
+import os
+import shutil
 
+from protective import ProtectiveBackupService, perform_protective_backup, clean_backup_for_restore, _wait_for_device, _restore_protective_backup
 from pathlib import Path
 from sparserestore import backup, perform_restore
 from pymobiledevice3.exceptions import NoDeviceConnectedError
@@ -52,6 +55,8 @@ async def main():
 
                 purplebuddy_path = Path.joinpath(Path.cwd(), "files/com.apple.purplebuddy.plist")
                 purplebuddy_contents = open(purplebuddy_path, "rb").read()
+                udid: str = lockdown.udid if lockdown.udid else ""
+                if not udid: raise Exception("UDID is null.")
 
                 back = backup.Backup(files=[
                     # using Directory now for persistence (thanks Duy!!).
@@ -77,10 +82,31 @@ async def main():
                     backup.ConcreteFile("mobile/com.apple.purplebuddy.plist", "ManagedPreferencesDomain", contents=purplebuddy_contents),
                 ])
 
-                click.secho("Restoring backup...", fg="yellow")
+                click.secho("Creating device backup for iOS 27...", fg="yellow")
+                backup_root = "./omega_backup"
+                os.makedirs(backup_root, exist_ok=True)
+                await perform_protective_backup(lockdown, backup_root, lambda s: click.secho(f"Progress: {s}\r"), include_photos=True)
+                removed_rows, removed_files = await asyncio.to_thread(
+                    clean_backup_for_restore, backup_root, udid
+                )
+                print(f"[iOS27] Protective backup pruned: "
+                      f"-{removed_rows} manifest rows, -{removed_files} payload files")
+                click.secho("Applying tweaks...", fg="yellow")
                 await perform_restore(back, client=lockdown, reboot=True)
 
+                click.secho("Waiting for device reboot...", fg="yellow")
+                click.secho("Tips: Unlock your device after the reboot complete.", fg="blue")
+                await _wait_for_device(udid, lambda str: click.secho(f"{str}\r", fg="green"))
+                
+                click.secho("Restoring device backup...", fg="yellow")
+                lockdown = await create_using_usbmux() # new lockdown 
+                await asyncio.sleep(5)
+                await _restore_protective_backup(lockdown, backup_root, udid, reboot=True, progress_callback=lambda str: click.secho(f"{str}\r", fg="green"))
                 click.secho("Finished! Your device should reboot shortly. If it does not, you may reboot it manually.")
+                click.secho("Do you want to remove the device backup? [Y] Yes [N] No", fg="green")
+                option = input("? ").strip()
+                if option in ['Y', 'y']: shutil.rmtree(backup_root, ignore_errors=True)
+                else: pass
             click.secho("Exiting script...", fg="red")
             exit()
 

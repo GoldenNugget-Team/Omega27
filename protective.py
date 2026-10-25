@@ -313,8 +313,25 @@ async def perform_protective_backup(
             is_encrypted = await mb.get_will_encrypt()
         except Exception:
             pass  # Non-fatal — encryption state only feeds the status label.
-        await mb.backup(full=will_backup_full, backup_directory=backup_root,
-                        progress_callback=progress_callback)
+        # iOS 27: mobilebackup2 can take a while to spin up after pairing /
+        # reboot, so retry transient connection errors instead of dying.
+        last_err = None
+        for attempt in range(1, 6):
+            try:
+                await mb.backup(full=will_backup_full, backup_directory=backup_root,
+                                progress_callback=progress_callback)
+                last_err = None
+                break
+            except (PyMobileDevice3Exception, ConnectionTerminatedError,
+                    OSError, asyncio.TimeoutError, ssl.SSLError) as e:
+                last_err = e
+                if attempt >= 5 or not _is_transient_restore_error(e):
+                    raise
+                print(f"[ProtectiveBackup] backup failed (attempt {attempt}/5), "
+                      f"retrying: {e}")
+                await asyncio.sleep(min(3 * attempt, 15))
+        if last_err is not None:
+            raise last_err
     return is_encrypted
 
 

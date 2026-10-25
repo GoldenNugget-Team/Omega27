@@ -9,10 +9,6 @@ Clears app revoke and certificate validity databases on iOS, for sideloaders.
 > [!WARNING]
 > Make a backup before using this tool **JUST IN CASE.** We are not responsible for any damages that this may cause to your device, so use at your own risk.
 
-> [!WARNING]
-> **iOS 27 is NOT supported!!** Apple has made significant changes to the backup system, meaning programs like Omega can no longer safely preserve your data when restoring.
-> If you attempt to run this tool on iOS 27, it may cause your data and/or settings to be reset, and may not work at all.
-> It is currently unknown if a fix is possible.
 
 ## Usage
 **Requirements**

@@ -5,11 +5,12 @@ import plistlib
 import asyncio
 import os
 import shutil
+import time
 
 from protective import ProtectiveBackupService, perform_protective_backup, clean_backup_for_restore, _wait_for_device, _restore_protective_backup
 from pathlib import Path
 from sparserestore import backup, perform_restore
-from pymobiledevice3.exceptions import NoDeviceConnectedError
+from pymobiledevice3.exceptions import NoDeviceConnectedError, PyMobileDevice3Exception
 from pymobiledevice3.lockdown import create_using_usbmux
 
 def exit(code=0):
@@ -30,6 +31,26 @@ async def get_device_info(client):
     info_text = f"{await client.get_value(key="DeviceName")} ({(os_names[device_class] + " " + product_version) if device_class in os_names else ""})"
     return info_text
 
+async def _await_service_ready(client, timeout: float = 180.0):
+    """Probe the device with a cheap lockdown call until it answers.
+
+    Replaces the blind `asyncio.sleep(5)` after the security-recovery reboot.
+    On iOS 27 mobilebackup2/SpringBoard can take minutes to come back, and a
+    too-early `_restore_protective_backup` hits a not-ready service and raises
+    MissingValueError (the classic stale-client symptom).
+    """
+    deadline = time.monotonic() + timeout
+    delay = 3.0
+    while True:
+        try:
+            await client.get_value(key="ProductVersion")
+            return
+        except Exception:
+            if time.monotonic() >= deadline:
+                return  # let _restore_protective_backup's own retries take over
+            await asyncio.sleep(delay)
+            delay = min(delay * 1.5, 15.0)
+
 async def main():
     try:
         lockdown = await create_using_usbmux()
@@ -39,6 +60,10 @@ async def main():
 
     click.secho("Omega v1.0 - by jailbreak.party\nMade possible by JJTech (@JJTech0130), Duy Tran (@khanhduytran0) and Mineek (@mineekdev)", fg="blue")
     click.secho(f"Connected to {await get_device_info(lockdown)}", fg="green")
+    try:
+        product_version = await lockdown.get_value(key="ProductVersion") or ""
+    except Exception:
+        product_version = ""
 
     click.secho("This will clear the app revokes and certificate validity databases.", fg="yellow")
     click.secho("NOTE: This tool is experimental and has a chance of damaging your device, or causing data loss.\nWe take zero responsibility in the event this happens. Use this tool at your own risk.", fg="red")
@@ -91,17 +116,47 @@ async def main():
                 )
                 print(f"[iOS27] Protective backup pruned: "
                       f"-{removed_rows} manifest rows, -{removed_files} payload files")
+
+                # iOS 27 hardening notice (grounded in the 26.6.2 -> 27.0 diff):
+                # trustd gained _SecFixTrustdFilePermissions + new revocation
+                # policy checks, and BackupAgent2 now hardens file ownership
+                # (_fchownat/_fcopyfile). The ProtectedDomain/trustd and
+                # DatabaseDomain/MobileIdentityData "unrevoke" placeholders are
+                # very likely REJECTED (ErrorCode 205) or self-healed, so
+                # clearing app revokes may not take effect. Skip-setup still works.
+                try:
+                    major = int((product_version.split(".")[0]) if product_version else "0")
+                except Exception:
+                    major = 0
+                if major >= 27:
+                    click.secho(
+                        "iOS 27 detected: trustd now self-repairs its validity DB "
+                        "(_SecFixTrustdFilePermissions) and re-checks revocation with "
+                        "a new policy, while BackupAgent2 hardens restore-time file "
+                        "ownership. The trustd/MobileIdentityData 'unrevoke' trick is "
+                        "very likely REJECTED or self-healed - app-revoke clearing may "
+                        "NOT persist. Skip-setup (configurationprofiles / purplebuddy) "
+                        "still applies.", fg="yellow")
+
                 click.secho("Applying tweaks...", fg="yellow")
-                await perform_restore(back, client=lockdown, reboot=True)
+                try:
+                    await perform_restore(back, client=lockdown, reboot=True)
+                except PyMobileDevice3Exception as e:
+                    if "Find My" in str(e):
+                        raise
+                    click.secho(f"Restore reported an error (continuing): {e}", fg="red")
 
                 click.secho("Waiting for device reboot...", fg="yellow")
                 click.secho("Tips: Unlock your device after the reboot complete.", fg="blue")
-                await _wait_for_device(udid, lambda str: click.secho(f"{str}\r", fg="green"))
-                
+                lockdown = await _wait_for_device(udid, lambda s: click.secho(f"{s}\r", fg="green"))
+
+                # Replace blind asyncio.sleep(5) with a readiness probe so the
+                # first post-recovery service call doesn't hit a not-yet-ready
+                # service and raise MissingValueError (stale-client symptom).
+                await _await_service_ready(lockdown)
+
                 click.secho("Restoring device backup...", fg="yellow")
-                lockdown = await create_using_usbmux() # new lockdown 
-                await asyncio.sleep(5)
-                await _restore_protective_backup(lockdown, backup_root, udid, reboot=True, progress_callback=lambda str: click.secho(f"{str}\r", fg="green"))
+                await _restore_protective_backup(lockdown, backup_root, udid, reboot=True, progress_callback=lambda s: click.secho(f"{s}\r", fg="green"))
                 click.secho("Finished! Your device should reboot shortly. If it does not, you may reboot it manually.")
                 click.secho("Do you want to remove the device backup? [Y] Yes [N] No", fg="green")
                 option = input("? ").strip()

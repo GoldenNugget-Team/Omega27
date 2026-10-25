@@ -1,10 +1,8 @@
-# Omega
-***(formerly BlacklistBeGone)***
+# Omega27
+A fork of [Omega](https://github.com/jailbreakdotparty/Omega) with iOS 27 support
 
-Clears app revoke and certificate validity databases on iOS, for sideloaders.
-<p align="left">
-  <strong><a href="https://jailbreak.party/discord">Join our Discord!</a></strong>
-</p>
+Clears app revoke and certificate validity databases on iOS, for sideloaders.\
+[Join discord for support!](https://discord.com/invite/Rm6r4zeE3y)
 
 > [!WARNING]
 > Make a backup before using this tool **JUST IN CASE.** We are not responsible for any damages that this may cause to your device, so use at your own risk.
@@ -31,6 +29,8 @@ Using partial backups, we can restore these files and clear them, or replace the
 This tool replaces the databases with directories of the same name, which causes the system to fail when attempting to write to them, therefore preventing your device from "remembering" any revokes or blacklisted certificates.
 
 ## Credits
+- [Omega (aka BlackListBeGone)](https://github.com/jailbreakdotparty/Omega) - Original PoC
+- [GoldenNugget](https://github.com/goldennugget-team/goldennugget) - iOS 27 backup/restore core
 - [Mineek](https://github.com/mineek) - documented & discovered [this whole concept](https://gist.github.com/mineek/f17df8b95e6fb168a9b9929e2993e900/)
 - [Duy Tran](https://github.com/khanhduytran0) - shared persistence (directory overwrite) strategy
 - [JJTech](https://github.com/JJTech0130/) - developed [sparserestore](https://github.com/JJTech0130/TrollRestore/tree/main/sparserestore) (backup creation) library
